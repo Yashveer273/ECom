@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { createProduct } from './Api';
 
- 
+// --- Utility Functions ---
+
 const slugify = (text) => {
     if (!text) return '';
     return text
@@ -11,20 +12,18 @@ const slugify = (text) => {
 }
 
 
-const generateUniqueId = () => {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-        return crypto.randomUUID();
-    }
-    return 'id-' + Date.now() + Math.random().toString(16).slice(2);
+// Converts a comma-separated string into an array of strings
+const parseStringArray = (str) => {
+    if (!str) return [];
+    return str.split(',').map(s => s.trim()).filter(s => s.length > 0);
 };
 
-
+// --- Constants ---
 
 const VALID_STATUSES = ['Draft', 'Pending Review', 'Published', 'Archived'];
 
-
 const VENDOR_LIST = [
-    { id: '', name: 'Select Vendor' }, // Placeholder
+    { id: '', name: 'Select Vendor' }, 
     { id: 'VEN-2023-A789', name: 'Global Distributors Inc.' },
     { id: 'VEN-2024-B101', name: 'Tech Solutions LLC' },
     { id: 'VEN-2024-C202', name: 'Cosmetic Kings India' },
@@ -33,63 +32,27 @@ const VENDOR_LIST = [
 
 const CATEGORY_LIST = [
     'Select Category', 'Electronics', 'Mobile Phones & Accessories', 'Clothing & Apparel',
-    'Beauty, Health & Personal Care (Cosmetics)', 'Home & Kitchen', 'Books & Media',
-    'Sports & Fitness', 'Automotive', 'Toys & Gaming'
+    'Beauty, Health & Personal Care (Cosmetics)', 'Home & Kitchen', 'Books & Media'
 ];
 
-// Function to generate the initial form structure
-const getInitialFormData = (vendorOptions, categoryOptions) => ({
-    name: '',
-    brand: '',
-    category: categoryOptions[0],
-    subCategory: '',
-    vendorId: vendorOptions[0].id,
-    vendorName: vendorOptions[0].name,
-    price: { mrp: '', sellingPrice: 0,discountPercent: '',  }, 
-    
-    publishStatus: 'Draft',
-    sku: '',
-    slug: '',
-    warrantyYears: '',
-    returnPolicyDays: 7, 
-    
-  
-    images: [{ url: '', alt: '', isPrimary: true }],
-    
-      highlightHeading: '', 
-    specifications: [{ key: '', value: '' }], 
+// --- Popup Component ---
 
-
-    productColors: [
-    
-    ],
-    
- 
-    variations: [{ 
-        color: '',
-        size: '', 
-        stock: 0, 
-        sku: '',
-    }], 
-
-    keywords: '',
-    tags: '',
-    description: { story: '', details: '', styleNote: '' }, 
-});
-
-// --- Popup Message Component ---
 const PopupMessage = ({ message, isError, onClose, visible }) => {
     if (!visible) return null;
 
+    const popupClass = isError 
+        ? "bg-red-500 text-white" 
+        : "bg-green-500 text-white";
+
     return (
-        <div className={`popup-overlay ${visible ? 'active' : ''}`}>
-            <div className={`popup-box ${isError ? 'error' : 'success'}`}>
-                <h4 className="popup-title">
-                    {isError ? 'Submission Error' : 'Success!'}
-                </h4>
-                <p className="popup-content">{message}</p>
-                <button onClick={onClose} className="btn btn-primary popup-close-btn">
-                    Close
+        <div className="fixed top-4 right-4 z-50 transition-opacity duration-300 shadow-xl rounded-lg overflow-hidden">
+            <div className={`p-4 flex items-center justify-between ${popupClass}`}>
+                <p className="font-semibold text-sm mr-4">{message}</p>
+                <button 
+                    onClick={onClose} 
+                    className="ml-4 text-white hover:text-opacity-80 transition"
+                >
+                    &times;
                 </button>
             </div>
         </div>
@@ -97,1401 +60,1290 @@ const PopupMessage = ({ message, isError, onClose, visible }) => {
 };
 
 
-// --- Main React Component ---
+// A reusable input component for price/number fields
+const PriceInput = ({ label, name, value, isReadOnly, suffix, onChange }) => {
+        
+    const displayValue = isReadOnly 
+        ? (Number(value) || 0).toFixed(2) 
+        : value;
+
+    return (
+        <div className="form-group">
+            <label htmlFor={name}>{label}</label>
+            <div className="relative">
+                <input
+                    id={name}
+                    name={name}
+                    // Type text to allow for live decimal input without losing focus
+                    type="text" 
+                    pattern="[0-9]*[.]?[0-9]*" 
+                    inputMode="decimal"
+                    value={displayValue} 
+                    onChange={onChange}
+                    readOnly={isReadOnly}
+                    className={isReadOnly ? 'bg-gray-100 cursor-default' : ''}
+                    placeholder="0"
+                />
+                {suffix && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 font-medium pointer-events-none">
+                        {suffix}
+                    </span>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// Component for stylish Selling Price display
+const SellingPriceDisplay = ({ price, currency }) => {
+    const formattedPrice = (Number(price) || 0).toFixed(2);
+
+    return (
+        <div className="form-group">
+            <label>Final Selling Price</label>
+            <div className="bg-green-50 border border-green-200 p-3 rounded-lg shadow-inner flex items-center justify-center h-full min-h-[42px]">
+                <h3 className="text-2xl font-extrabold text-green-700 tracking-tight">
+                    <span className="text-lg font-semibold mr-1">{currency}</span>
+                    {formattedPrice}
+                </h3>
+            </div>
+        </div>
+    );
+};
+
+
+// --- Main Component ---
 
 const CreateProduct = () => {
-    
-    const VENDOR_OPTIONS = useMemo(() => VENDOR_LIST, []);
-    const CATEGORY_OPTIONS = useMemo(() => CATEGORY_LIST, []);
-    
-     const initialData = useMemo(() => getInitialFormData(VENDOR_OPTIONS, CATEGORY_OPTIONS), [VENDOR_OPTIONS, CATEGORY_OPTIONS]);
-
-    // Form State
-    const [formData, setFormData] = useState(initialData);
     const [loading, setLoading] = useState(false);
+    const [popup, setPopup] = useState({ message: '', isError: false, visible: false });
+    // State to track the index of the image being edited (null for adding new)
+    const [editingImageIndex, setEditingImageIndex] = useState(null); 
     
-    // Popup State
-    const [popup, setPopup] = useState({ 
-        visible: false, 
-        message: '', 
-        isError: false 
+    // --- Initial Variation State Structure ---
+    // Defined once outside to use as a fallback and initializer
+    const getInitialVariationData = () => ({
+        // Core Variation Data
+        stock: '', 
+        inStock: false,
+        price: { // Single price object, will be wrapped in an array for schema upon submission
+            mrp: '', 
+            sellingPrice: 0,
+            discountPercent: '', 
+            currency: 'INR',
+        },
+        images: [], 
+        specifications: [], 
+        
+        // Description/Details/Policy (pulled from DetailSectionSchema)
+        story: '', 
+        details: '', 
+        styleNote: '',
+        // highlightHeading has been moved to top-level product state
+        warrantyYears: '', 
+        returnPolicyDays: '', 
+
+        // TEMP fields for UI
+        tempImageUrl: '',
+        tempImageAlt: '',
+        tempImageIsPrimary: false,
+        tempSpecKey: '', 
+        tempSpecValue: '', 
     });
-
-    // Function to prepare the data structure for the API call
-    const prepareProductData = (data) => {
-        // Data structure cleanup and preparation
-        const preparedData = {
-            ...data,
-            keywords: data.keywords.split(',').map(k => k.trim()).filter(k => k),
-            tags: data.tags.split(',').map(t => t.trim()).filter(t => t),
-            price: {
-                mrp: parseFloat(data.price.mrp) || 0,
-                sellingPrice: parseFloat(data.price.sellingPrice) || 0,
-                      discountPercent: parseFloat(data.price.discountPercent) || 0,
-            },
-      
-            warrantyYears: parseInt(data.warrantyYears) || 0,
-            returnPolicyDays: parseInt(data.returnPolicyDays) || 0,
-            
-            specifications: data.specifications.filter(s => s.key || s.value),
-
-            variations: data.variations
-                .filter(v => v.sku)
-                .map(v => {
-                     const selectedColor = data.productColors.find(c => c.id === v.color);
-                    return {
-                        ...v,
-                        color: selectedColor?.hex || v.color, 
-                        
-                       
-                      
-                    };
-                }), 
-            
-            productColors: data.productColors.map(({ id, ...rest }) => rest)
-        };
-        return preparedData;
-    };
-
-
-    const handleChange = (e) => {
-        const { name, value } = e.target;
+    
+    // Initial state aligned with the complex MongoDB schema
+    const initialFormData = useMemo(() => ({
+        name: '',
+        sku: '',
+        slug: '',
+        category: CATEGORY_LIST[0],
+        subCategory: '',
+        vendorId: VENDOR_LIST[0].id,
+        vendorName: VENDOR_LIST[0].name,
+        publishStatus: VALID_STATUSES[0],
+        brand: '', 
+        highlightHeading: '', // <-- highlightHeading is now top-level
         
-        setFormData(prev => {
-            const newState = { ...prev, [name]: value };
-            
+        seoKeywordsInput: '', 
+        internalTagsInput: '', 
+
+        // Variation Management
+        productColors: [], // [{ hex: string, isPrime: boolean }]
+        variationData: {}, // { 'HEX_CODE': VariationObject }
+
+        // TEMP fields for adding a new color/variation
+        newColorHex: '#4f46e5',
+        newColorIsPrime: false,
+    }), []);
     
-            if (name === 'name') {
-                newState.slug = slugify(value);
-            }
-            
-            return newState;
-        });
-    };
-    
-   
-    const handleVendorChange = (e) => {
-        const vendorId = e.target.value;
-        const selectedVendor = VENDOR_OPTIONS.find(v => v.id === vendorId);
-
-        setFormData(prev => ({
-            ...prev,
-            vendorId: vendorId,
-            vendorName: selectedVendor ? selectedVendor.name : '',
-        }));
-    };
-
-    const handlePriceChange = (e) => {
-        const { name, value } = e.target;
-   
-        const numericValue = value === '' ? '' : (parseFloat(value) || 0); 
-        
-        setFormData(prev => {
-            let mrp = prev.price.mrp;
-            let sellingPrice = prev.price.sellingPrice;
-            let discountPercent = prev.price.discountPercent;
-            
-            if (name === 'mrp') {
-                mrp = numericValue;
-            } else if (name === 'discountPercent') {
-              
-                discountPercent = numericValue === '' ? '' : Math.min(100, Math.max(0, numericValue));
-            }
-            
-           
-            const safeMrp = parseFloat(mrp || 0) || 0;
-            const safeDiscount = parseFloat(discountPercent || 0) || 0;
-
-            if (safeMrp > 0) {
-                sellingPrice = safeMrp * (1 - (safeDiscount / 100));
-            } else {
-                sellingPrice = 0;
-            }
-
-            return {
-                ...prev,
-                price: {
-                    mrp: mrp,
-                    sellingPrice: parseFloat(sellingPrice.toFixed(2)) ,
-                    discountPercent: discountPercent 
-                },
-                
-            };
-        });
-    };
-
-    const handleDescriptionChange = (e) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({
-            ...prev,
-            description: {
-                ...prev.description,
-                [name]: value
-            }
-        }));
-    };
-
-    // --- Specification Handlers ---
-    
-    const handleSpecChange = (specIndex, e) => {
-        const { name, value } = e.target;
-        const newSpecs = [...formData.specifications];
-
-        newSpecs[specIndex] = {
-            ...newSpecs[specIndex],
-            [name]: value
-        };
-        
-        setFormData(prev => ({ ...prev, specifications: newSpecs }));
-    };
-
-    const addSpecField = () => {
-        setFormData(prev => ({
-            ...prev,
-            specifications: [
-                ...prev.specifications,
-                { key: '', value: '' }
-            ]
-        }));
-    };
-    
-    const removeSpecField = (specIndex) => {
-        setFormData(prev => {
-            let newSpecs = prev.specifications.filter((_, i) => i !== specIndex);
-            
-            if (newSpecs.length === 0) {
-                 newSpecs = [{ key: '', value: '' }];
-            }
-            
-            return { ...prev, specifications: newSpecs };
-        });
-    };
-    
-   
-    const handleColorChange = (index, key, value) => {
-        setFormData(prev => ({
-            ...prev,
-            productColors: prev.productColors.map((color, i) => {
-                if (i === index) {
-                
-                    const updatedColor = { ...color, [key]: value };
-                    
-                 
-                    if (key === 'isPrime' && value === true) {
-                        return { ...updatedColor, isPrime: true };
-                    }
-                  
-                    if (key === 'hex') {
-                        return { ...updatedColor, hex: value.toUpperCase() };
-                    }
-                    return updatedColor;
-                } else if (key === 'isPrime' && value === true) {
-                   return { ...color, isPrime: false };
-                }
-                return color;
-            })
-        }));
-    };
-
-    const addProductColor = () => {
-        setFormData(prev => {
-            const hasPrime = prev.productColors.some(c => c.isPrime);
-            const newColor = { 
-                id: generateUniqueId(), 
-                hex: '#FFFFFF', // Default new color is white
-                isPrime: !hasPrime,
-                
-            };
-
-            const updatedColors = !hasPrime 
-                ? prev.productColors.map(c => ({ ...c, isPrime: false })) 
-                : prev.productColors;
-
-            return {
-                ...prev,
-                productColors: [...updatedColors, newColor]
-            };
-        });
-    };
-
-    const removeProductColor = (idToRemove) => {
-        setFormData(prev => {
-            const newColors = prev.productColors.filter(color => color.id !== idToRemove);
-            
-            if (newColors.length > 0 && !newColors.some(c => c.isPrime)) {
-                newColors[0] = { ...newColors[0], isPrime: true };
-            }
-
-            if (newColors.length === 0) {
-                 return { ...prev, productColors: [{ id: generateUniqueId(), hex: '#007bff', isPrime: true, }] };
-            }
-            
-            return { 
-                ...prev, 
-                productColors: newColors,
-                variations: prev.variations.filter(v => v.color !== idToRemove),
-            };
-        });
-    };
+    const [formData, setFormData] = useState(initialFormData);
+    const [currentVariationHex, setCurrentVariationHex] = useState(null);
     
 
-    const handleImageChange = (index, e) => {
-        const { name, value } = e.target;
-        const newImages = [...formData.images];
-        newImages[index] = {
-            ...newImages[index],
-            [name]: value
-        };
-        setFormData(prev => ({ ...prev, images: newImages }));
-    };
+    // Set default current variation when colors change
+    React.useEffect(() => {
+        // If there is no selection, but colors exist, select the primary one or the first one
+        if (!currentVariationHex && formData.productColors.length > 0) {
+            setCurrentVariationHex(formData.productColors.find(c => c.isPrime)?.hex || formData.productColors[0].hex);
+        } else if (formData.productColors.length === 0) {
+            // If all colors are removed, ensure currentVariationHex is null
+            setCurrentVariationHex(null);
+        }
+        // If the currently selected hex is removed, move selection to the next valid color
+        if (currentVariationHex && !formData.productColors.some(c => c.hex === currentVariationHex)) {
+             setCurrentVariationHex(formData.productColors.find(c => c.isPrime)?.hex || formData.productColors[0]?.hex || null);
+        }
+    }, [formData.productColors, currentVariationHex]);
     
-    const handlePrimaryImageChange = (index) => {
-        setFormData(prev => {
-            const newImages = prev.images.map((img, i) => ({
-                ...img,
-                isPrimary: i === index
-            }));
-            return { ...prev, images: newImages };
-        });
+
+    const showPopup = (message, isError = false) => {
+        setPopup({ message, isError, visible: true });
+        setTimeout(() => closePopup(), 5000);
     };
-
-    const addImageField = () => {
-        setFormData(prev => ({
-            ...prev,
-            images: [...prev.images, { url: '', alt: '', isPrimary: false }] 
-        }));
-    };
-
-    const removeImageField = (indexToRemove) => {
-        setFormData(prev => {
-            let newImages = prev.images.filter((_, index) => index !== indexToRemove);
-
-            if (newImages.length === 0) {
-                return { ...prev, images: [{ url: '', alt: '', isPrimary: true }] };
-            }
-
-            if (!newImages.some(img => img.isPrimary)) {
-                newImages[0] = { ...newImages[0], isPrimary: true };
-            }
-
-            return { ...prev, images: newImages };
-        });
-    };
-
-
-
-    const handleVariationChange = (index, e) => {
-        const { name, value } = e.target;
-        const newVariations = [...formData.variations];
-        
-         const finalValue = name === 'stock' ? (parseInt(value) || 0) : value;
-
-        newVariations[index] = {
-            ...newVariations[index],
-            [name]: finalValue
-        };
-        setFormData(prev => ({ ...prev, variations: newVariations }));
-    };
-
-    const addVariationField = () => {
-        setFormData(prev => ({
-            ...prev,
-            variations: [...prev.variations, { color: '', size: '', stock: 0, sku: '' }]
-        }));
-    };
-
-    const removeVariationField = (indexToRemove) => {
-        setFormData(prev => {
-            const newVariations = prev.variations.filter((_, index) => index !== indexToRemove);
-            
-            if (newVariations.length === 0) {
-                 return { ...prev, variations: [{ color: '', size: '', stock: 0, sku: '' }] };
-            }
-            
-            return { ...prev, variations: newVariations };
-        });
-    };
-
-
 
     const closePopup = () => {
-        setPopup({ visible: false, message: '', isError: false });
+        setPopup(prev => ({ ...prev, visible: false }));
     };
+
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        
+        if (name === 'name') {
+            setFormData(prev => ({ ...prev, name: value, slug: slugify(value) }));
+            return;
+        }
+
+        if (name === 'vendorId') {
+            const selectedVendor = VENDOR_LIST.find(v => v.id === value);
+             setFormData(prev => ({
+                ...prev,
+                vendorId: value,
+                vendorName: selectedVendor ? selectedVendor.name : '',
+            }));
+            return;
+        }
+        
+        setFormData(prev => ({ ...prev, [name]: value }));
+    };
+
+    // --- Variation Handlers ---
+    
+    const handleNewColorChange = (e) => {
+        const { name, value, type, checked } = e.target;
+        setFormData(prev => ({
+            ...prev,
+            [name]: type === 'checkbox' ? checked : value,
+        }));
+    };
+
+    const handleAddColor = () => {
+        const hex = formData.newColorHex.toUpperCase();
+        if (!hex || formData.productColors.some(c => c.hex === hex)) {
+            showPopup("Color already exists or is invalid.", true);
+            return;
+        }
+
+        const newColor = { hex, isPrime: formData.newColorIsPrime };
+
+        setFormData(prev => {
+            // Unset previous primary if a new one is set
+            const updatedColors = newColor.isPrime 
+                ? prev.productColors.map(c => ({ ...c, isPrime: false })) 
+                : prev.productColors;
+                
+            const finalColors = [...updatedColors, newColor];
+            
+            return {
+                ...prev,
+                productColors: finalColors,
+                variationData: {
+                    ...prev.variationData,
+                    [hex]: getInitialVariationData()
+                },
+                newColorHex: '#4f46e5',
+                newColorIsPrime: false,
+            };
+        });
+        setCurrentVariationHex(hex);
+    };
+
+    const handleRemoveColor = (hexToRemove) => {
+        setFormData(prev => {
+            const newColors = prev.productColors.filter(c => c.hex !== hexToRemove);
+            const newVariations = { ...prev.variationData };
+            delete newVariations[hexToRemove];
+            
+            return {
+                ...prev,
+                productColors: newColors,
+                variationData: newVariations
+            };
+        });
+        // The useEffect hook handles setting the new currentVariationHex after removal
+    };
+
+    // Enforces single primary color on edit/selection
+    const handleSetPrimaryColor = (hexToSet) => {
+        setFormData(prev => ({
+            ...prev,
+            productColors: prev.productColors.map(color => ({
+                ...color,
+                isPrime: color.hex === hexToSet, // Only set true for the target hex
+            }))
+        }));
+        showPopup(`${hexToSet} set as the Primary Color.`, false);
+    };
+    
+    const handleVariationChange = (e) => {
+        const { name, value, type, checked } = e.target;
+        const currentVariationData = formData.variationData[currentVariationHex];
+        
+        // --- GUARD CLAUSE: Prevent error if no variation is selected or defined ---
+        if (!currentVariationData) {
+            console.error("Attempted to change variation data but no current variation is selected or defined.");
+            return;
+        }
+        // --- END GUARD CLAUSE ---
+        
+        // --- Handle Price updates (maintains string state for input focus) ---
+        if (['mrp', 'discountPercent', 'currency'].includes(name)) {
+            
+            let inputValue = value; 
+            
+            if (name !== 'currency') {
+                // Allows only digits and one decimal point
+                inputValue = inputValue.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+            }
+
+            let newMrp = name === 'mrp' ? inputValue : currentVariationData.price.mrp;
+            let newDiscountPercent = name === 'discountPercent' ? inputValue : currentVariationData.price.discountPercent;
+            let newCurrency = name === 'currency' ? inputValue : currentVariationData.price.currency;
+            
+            // Convert to number for calculation, defaulting to 0 if empty or invalid
+            const calcMrp = Number(newMrp) || 0;
+            const rawDiscount = Number(newDiscountPercent) || 0;
+            
+            // Cap discount at 100% for calculation
+            const calcDiscount = Math.min(100, Math.max(0, rawDiscount));
+            
+            // Calculate Selling Price
+            const discountAmount = calcMrp * (calcDiscount / 100);
+            const newSellingPrice = Math.max(0, calcMrp - discountAmount);
+            
+            setFormData(prev => ({
+                ...prev,
+                variationData: {
+                    ...prev.variationData,
+                    [currentVariationHex]: {
+                        ...prev.variationData[currentVariationHex],
+                        price: {
+                            // Store raw string value for input control
+                            mrp: newMrp, 
+                            discountPercent: newDiscountPercent,
+                            // Store calculated value as a number (it's readOnly)
+                            sellingPrice: newSellingPrice, 
+                            currency: newCurrency,
+                        }
+                    }
+                }
+            }));
+            return;
+            
+        } 
+        
+        // --- Handle all other updates ---
+        
+        // FIX: Correctly handle boolean values from checkboxes
+        const updateValue = (type === 'checkbox') ? checked : value;
+            
+        setFormData(prev => ({
+            ...prev,
+            variationData: {
+                ...prev.variationData,
+                [currentVariationHex]: {
+                    ...prev.variationData[currentVariationHex],
+                    [name]: updateValue, 
+                    
+                    // Auto update inStock based on stock
+                    inStock: name === 'stock' ? (Number(value) > 0) : prev.variationData[currentVariationHex].inStock,
+                }
+            }
+        }));
+    };
+    
+    // --- Specification Handlers (Unchanged) ---
+    
+    const handleAddSpecification = () => {
+        const variation = formData.variationData[currentVariationHex];
+        if (!variation.tempSpecKey || !variation.tempSpecValue) {
+            showPopup("Both Key and Value must be entered for the specification.", true);
+            return;
+        }
+        
+        const newSpec = {
+            key: variation.tempSpecKey.trim(),
+            value: variation.tempSpecValue.trim(),
+        };
+        
+        setFormData(prev => ({
+            ...prev,
+            variationData: {
+                ...prev.variationData,
+                [currentVariationHex]: {
+                    ...prev.variationData[currentVariationHex],
+                    specifications: [...prev.variationData[currentVariationHex].specifications, newSpec],
+                    tempSpecKey: '',
+                    tempSpecValue: '',
+                }
+            }
+        }));
+    };
+
+    const handleRemoveSpecification = (index) => {
+        setFormData(prev => ({
+            ...prev,
+            variationData: {
+                ...prev.variationData,
+                [currentVariationHex]: {
+                    specifications: prev.variationData[currentVariationHex].specifications.filter((_, i) => i !== index),
+                }
+            }
+        }));
+    };
+    
+    // --- Image Handlers (Updated for Edit/Save/Delete) ---
+
+    // 1. Start Edit Mode
+    const handleStartEditImage = (index) => {
+        const variation = formData.variationData[currentVariationHex];
+        const imageToEdit = variation.images[index];
+        
+        // Populate the temporary fields with the image data using the existing change handler
+        handleVariationChange({ target: { name: 'tempImageUrl', value: imageToEdit.url } });
+        handleVariationChange({ target: { name: 'tempImageAlt', value: imageToEdit.alt } });
+        // Pass the boolean value directly for checkbox state
+        setFormData(prev => ({
+            ...prev,
+            variationData: {
+                ...prev.variationData,
+                [currentVariationHex]: {
+                    ...prev.variationData[currentVariationHex],
+                    tempImageIsPrimary: imageToEdit.isPrimary,
+                }
+            }
+        }));
+        
+        setEditingImageIndex(index);
+        showPopup(`Editing image at index ${index}. Click 'Update Image' to save changes.`, false);
+    };
+
+    // 2. Cancel Edit Mode
+    const handleCancelEdit = () => {
+        setEditingImageIndex(null);
+        // Clear temp fields explicitly
+        setFormData(prev => ({
+            ...prev,
+            variationData: {
+                ...prev.variationData,
+                [currentVariationHex]: {
+                    ...prev.variationData[currentVariationHex],
+                    tempImageUrl: '',
+                    tempImageAlt: '',
+                    tempImageIsPrimary: false,
+                }
+            }
+        }));
+    };
+    
+    // 3. Save Image (Add or Update)
+    const handleSaveImage = () => {
+        const variation = formData.variationData[currentVariationHex];
+        const { tempImageUrl, tempImageAlt, tempImageIsPrimary } = variation;
+
+        if (!tempImageUrl) {
+            showPopup("Image URL is required.", true);
+            return;
+        }
+
+        const imageToSave = {
+            url: tempImageUrl,
+            alt: tempImageAlt || formData.name + ' ' + currentVariationHex,
+            isPrimary: tempImageIsPrimary,
+        };
+        
+        setFormData(prev => {
+            const currentImages = prev.variationData[currentVariationHex].images;
+            let imagesArray = [...currentImages];
+            
+            // --- Primary Status Management ---
+            // If the image being saved is primary, ensure all others in the array are not primary.
+            if (imageToSave.isPrimary) {
+                imagesArray = imagesArray.map(img => ({ ...img, isPrimary: false }));
+            }
+
+            // --- Add or Update ---
+            if (editingImageIndex !== null) {
+                // UPDATE: Insert the imageToSave at the existing index
+                imagesArray.splice(editingImageIndex, 1, imageToSave);
+            } else {
+                // ADD: Push the new image
+                imagesArray.push(imageToSave);
+            }
+            
+            return {
+                ...prev,
+                variationData: {
+                    ...prev.variationData,
+                    [currentVariationHex]: {
+                        ...prev.variationData[currentVariationHex],
+                        images: imagesArray,
+                    }
+                }
+            };
+        });
+
+        // Final cleanup
+        handleCancelEdit(); // Clears temp fields and resets editingImageIndex
+        showPopup(editingImageIndex !== null ? "Image updated successfully!" : "Image added successfully!", false);
+    };
+
+    // 4. Remove Image (Corrected for immutability and error handling)
+    const handleRemoveImage = (index) => {
+        // Guard clause to ensure a variation is selected
+        if (!currentVariationHex) {
+            showPopup("No color variation selected to remove an image from.", true);
+            return;
+        }
+        
+        setFormData(prev => {
+            // 1. Get the specific variation data
+            const currentVariation = prev.variationData[currentVariationHex];
+            
+            // 2. Create the new images array by filtering (immutability)
+            const newImages = currentVariation.images.filter((_, i) => i !== index);
+            
+            // 3. Update the state immutably
+            return {
+                ...prev,
+                variationData: {
+                    ...prev.variationData,
+                    [currentVariationHex]: {
+                        ...currentVariation, // Copy existing variation data
+                        images: newImages, // Set the new image array
+                    }
+                }
+            };
+        });
+
+        // Clear edit mode if the deleted image was the one being edited
+        if (editingImageIndex === index) {
+            handleCancelEdit();
+        }
+        showPopup("Image successfully removed.", false);
+    };
+
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        
+        if (!formData.name || !formData.category || formData.category === CATEGORY_LIST[0] || !formData.vendorId) {
+            showPopup("Please fill in Product Name, Category, and Vendor.", true);
+            return;
+        }
+
+        if (formData.productColors.length === 0) {
+            showPopup("Please add at least one color variation.", true);
+            return;
+        }
+        
+        // Final check for a primary color (top-level product primary color)
+        const primaryColorCheck = formData.productColors.find(c => c.isPrime);
+        if (!primaryColorCheck) {
+             showPopup("ERROR: You must set exactly one color variation as the Primary Color before submitting.", true);
+            return; 
+        }
+
+        // --- NEW VALIDATION: Check for at least one Primary image per variation ---
+        for (const colorItem of formData.productColors) {
+            const hex = colorItem.hex;
+            const variationDetails = formData.variationData[hex];
+            
+            // This implicitly checks if images exist and if one is primary
+            const hasPrimaryImage = variationDetails.images.some(img => img.isPrimary);
+
+            if (!hasPrimaryImage) {
+                // If there are no images, show a specific error
+                if (variationDetails.images.length === 0) {
+                    showPopup(`ERROR: Color variation ${hex} must have at least one image added.`, true);
+                    setLoading(false);
+                    return;
+                }
+                // If there are images but none is primary, show this error
+                showPopup(`ERROR: Color variation ${hex} must have at least one image set as 'Primary' to represent the variant.`, true);
+                setLoading(false);
+                return;
+            }
+        }
+        // --- END NEW VALIDATION ---
+        
         setLoading(true);
-        closePopup(); 
-
         
-  
-        if (!formData.name || !formData.vendorId || formData.category === CATEGORY_OPTIONS[0]) {
-             setPopup({ visible: true, message: 'Error: Please fill in all required fields (Product Name, Vendor, Category).', isError: true });
-             setLoading(false);
-             return;
-        }
-
-        const mrp = parseFloat(formData.price.mrp || 0);
-        const sellingPrice = formData.price.sellingPrice;
-        
-        if (mrp <= 0 || sellingPrice <= 0) {
-            setPopup({ visible: true, message: 'Error: MRP and Selling Price must be greater than zero.', isError: true });
-            setLoading(false);
-            return;
-        }
-        
-        // Custom validation for colors
-        if (formData.productColors.length === 0 || !formData.productColors.some(c => c.isPrime)) {
-            setPopup({ visible: true, message: 'Error: You must define at least one color and designate one as the Prime Color.', isError: true });
-            setLoading(false);
-            return;
-        }
-
-        // Custom validation for variations
-        const hasInvalidVariations = formData.variations.some(v => v.sku && (!v.color || !v.size));
-        if (hasInvalidVariations) {
-            setPopup({ visible: true, message: 'Error: Variations with an SKU must have a selected Color and Size.', isError: true });
-            setLoading(false);
-            return;
-        }
-
-
-        // Data preparation
-        const productDataForAPI = prepareProductData(formData);
-
         try {
-            // Simulate API call
-            const response = await createProduct(productDataForAPI);
+            const keywords = parseStringArray(formData.seoKeywordsInput);
+            const tags = parseStringArray(formData.internalTagsInput);
             
-            // 1. Show success message in popup
-            setPopup({ visible: true, message: response.message, isError: false });
-            
-            // 2. Clear the form after successful submission
-            setFormData(initialData); 
+            // Build the variations array from variationData map
+            const variations = formData.productColors.map((colorItem, index) => {
+                const variationDetails = formData.variationData[colorItem.hex];
 
+                // Determine the base SKU for slug generation
+                const baseSku = formData.sku || 'product';
+                
+                // Construct the full SKU
+                const fullSku = `${baseSku}-${index}-${colorItem.hex.substring(1).toUpperCase()}`;
+                
+                // The display name for the variation will be based on the product name + color
+                const variationName = `${formData.name} - ${colorItem.hex}`;
+                
+                // Construct the Price object that conforms to PriceSchema
+                const priceObject = {
+                    mrp: Number(variationDetails.price.mrp) || 0,
+                    sellingPrice: variationDetails.price.sellingPrice,
+                    discountPercent: Number(variationDetails.price.discountPercent) || 0,
+                    currency: variationDetails.price.currency,
+                };
+                
+                // Construct the final variation object
+                return {
+                    color: colorItem.hex,
+                    size: "", // Hardcoded empty string as size input is not present in UI
+                    stock: Number(variationDetails.stock) || 0,
+                    sku: fullSku,
+                    // ✅ Schema Compliance: Generate slug from variation details (slug is on VariationSchema)
+                    slug: slugify(variationName), 
+                    
+                    productColors: [colorItem], // Array
+                    images: variationDetails.images, // Array
+                    specifications: variationDetails.specifications, // Array
+                    
+                    // ✅ SCHEMA COMPLIANCE FIX: Wrap the single price object in an array (price is [PriceSchema])
+                    price: [priceObject], 
+                    
+                    isActive: true,
+                    inStock: (Number(variationDetails.stock) || 0) > 0,
+                    description: {
+                        story: variationDetails.story,
+                        details: variationDetails.details,
+                        styleNote: variationDetails.styleNote,
+                    },
+                };
+            });
+            
+            // Find the primary color variation to use for top-level product fields
+            const primaryColor = primaryColorCheck;
+            // IMPORTANT: Get the variation data for the primary color. Use a fallback if it's somehow missing.
+            const primaryVariation = formData.variationData[primaryColor.hex] || getInitialVariationData();
+
+            // NOTE: The warranty and return policy fields are on the root ProductSchema, but
+            // they are currently edited per-variation in the UI. For submission, we take the value 
+            // from the currently selected primary variation.
+            const productData = {
+                // ✅ Basic Information
+                name: formData.name,
+                brand: formData.brand, 
+                category: formData.category,
+                subCategory: formData.subCategory,
+                
+                highlightHeading: formData.highlightHeading, // <-- Now using top-level formData
+                // Using values from the Primary Variation for these root fields
+                warrantyYears: Number(primaryVariation.warrantyYears) || 0,
+                returnPolicyDays: Number(primaryVariation.returnPolicyDays) || 7,
+                
+                variations: variations, // Array of VariationSchema
+
+                vendorId: formData.vendorId,
+                vendorName: formData.vendorName,
+                // NOTE: Schema expects ObjectId, generateUniqueId returns a string (Mocking)
+                addedBy: "ram" ,
+                
+                publishStatus: formData.publishStatus,
+                
+                // ✅ SEO & Metadata
+                keywords: keywords, // Array
+                tags: tags, // Array
+
+                // Mock/Default data for required root fields
+                vendorRating: 0,
+                isSponsored: false,
+                searchBoostScore: 0,
+                totalSales: 0,
+                suggestedProducts: [],
+                isFeatured: false,
+                isPopular: false,
+                isTrending: false,
+                avgRating: 0,
+                totalRatings: 0,
+                reviews: [], // Array
+            };
+
+          
+          await  createProduct(productData);
+             
+            showPopup("Product data successfully generated and logged to the console!", false);
+            
         } catch (error) {
-            const errorMsg = error.message || 'Product submission failed due to an unexpected error.';
-            console.error("Submission Error:", error);
-            setPopup({ visible: true, message: `Error: ${errorMsg}`, isError: true });
+            console.error("Error generating product data:", error);
+            showPopup(`Failed to generate product data: ${error.message}`, true);
         } finally {
             setLoading(false);
         }
     };
-    
 
+
+    // --- Render Helpers ---
+    
+    // Get the current variation data, using a fallback to prevent "cannot read properties of undefined"
+    const currentVariation = formData.variationData[currentVariationHex] || getInitialVariationData();
+    // Use optional chaining for safer access, though getInitialVariationData handles null price object
+    const currentPrice = currentVariation.price || getInitialVariationData().price; 
+
+    const isCurrentVariationPrimary = formData.productColors.find(c => c.hex === currentVariationHex)?.isPrime || false;
+
+    
     return (
         <>
             <style>
                 {`
-                    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+                    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
                     
-                    /* Global Styles & Variables */
-                    :root {
-                        --primary-blue: #007bff; /* E-commerce Primary Blue */
-                        --primary-dark: #0f1111; /* Amazon/Dark text */
-                        --secondary-green: #388e3c; /* Success/Go Green */
-                        --warning-red: #d32f2f; /* Error */
-                        --background-light: #f5f7fa; /* Light background for dashboard */
-                        --card-bg: #ffffff;
-                        --border-color: #e0e0e0;
-                        --shadow-light: rgba(0, 0, 0, 0.08);
-                        --light-grey: #f0f0f0;
-                        --dark-grey: #666;
+                    body { font-family: 'Inter', sans-serif; background-color: #f7f7f9; }
+                    .container { 
+                        max-width: 1200px; 
+                        margin: 20px auto; 
+                        padding: 30px; 
+                        background-color: white; 
+                        border-radius: 12px; 
+                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
                     }
-
-                    * {
-                        box-sizing: border-box;
+                    h1 { 
+                        font-size: 1.75rem; 
+                        font-weight: 700; 
+                        color: #1f2937; 
+                        margin-bottom: 20px; 
+                        border-bottom: 2px solid #e5e7eb; 
+                        padding-bottom: 10px;
                     }
-
-                    body {
-                        font-family: 'Inter', sans-serif;
-                        margin: 0;
-                        padding: 0;
-                        background-color: var(--background-light);
+                    .section-heading {
+                        font-size: 1.25rem;
+                        font-weight: 600;
+                        color: #4338ca;
+                        margin-top: 25px;
+                        margin-bottom: 15px;
+                        padding-left: 10px;
+                        border-left: 4px solid #4338ca;
                     }
-
-                    /* Dashboard Layout */
-                    .dashboard-container {
-                        max-width: 1200px;
-                        margin: 40px auto;
-                        padding: 20px;
-                        background-color: var(--background-light);
+                    .form-grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                        gap: 20px;
                     }
-
-                    .dashboard-header {
-                        padding: 15px 0;
-                        margin-bottom: 20px;
-                        border-bottom: 2px solid var(--primary-blue);
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                    }
-
-                    .dashboard-header h2 {
-                        margin: 0;
-                        color: var(--primary-dark);
-                        font-weight: 700;
-                    }
-                    
-                    .dashboard-header span {
-                        font-size: 0.8em;
-                        color: #666;
-                        padding: 5px 10px;
-                        background: var(--light-grey);
-                        border-radius: 4px;
-                    }
-
-                    /* Popup Styling */
-                    .popup-overlay {
-                        position: fixed;
-                        top: 0;
-                        left: 0;
-                        right: 0;
-                        bottom: 0;
-                        background-color: rgba(0, 0, 0, 0.5);
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        z-index: 1000;
-                        opacity: 0;
-                        visibility: hidden;
-                        transition: opacity 0.3s, visibility 0.3s;
-                    }
-
-                    .popup-overlay.active {
-                        opacity: 1;
-                        visibility: visible;
-                    }
-
-                    .popup-box {
-                        background-color: var(--card-bg);
-                        padding: 30px;
-                        border-radius: 8px;
-                        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
-                        max-width: 400px;
-                        width: 90%;
-                        text-align: center;
-                        transform: scale(0.9);
-                        transition: transform 0.3s ease-out;
-                    }
-                    
-                    .popup-overlay.active .popup-box {
-                        transform: scale(1);
-                    }
-
-                    .popup-box.success {
-                        border-top: 5px solid var(--secondary-green);
-                    }
-
-                    .popup-box.error {
-                        border-top: 5px solid var(--warning-red);
-                    }
-                    
-                    .popup-title {
-                        margin-top: 0;
-                        font-size: 1.5em;
-                        font-weight: 700;
-                    }
-
-                    .popup-box.success .popup-title {
-                        color: var(--secondary-green);
-                    }
-                    
-                    .popup-box.error .popup-title {
-                        color: var(--warning-red);
-                    }
-
-                    .popup-content {
-                        margin-bottom: 20px;
-                        font-size: 1em;
-                        color: #333;
-                    }
-
-                    .popup-close-btn {
-                        width: 100%;
-                    }
-
-                    /* Form and Card Styling (rest remains the same) */
-                    .product-form {
+                    .form-group {
                         display: flex;
                         flex-direction: column;
-                        gap: 20px;
                     }
-
-                    .card-section {
-                        background-color: var(--card-bg);
-                        padding: 25px;
-                        border-radius: 8px;
-                        box-shadow: 0 4px 12px var(--shadow-light);
-                        border: 1px solid var(--border-color);
+                    label {
+                        font-weight: 500;
+                        margin-bottom: 6px;
+                        color: #374151;
+                        font-size: 0.9rem;
                     }
-
-                    .card-section h3 {
-                        margin-top: 0;
-                        margin-bottom: 20px;
-                        padding-bottom: 10px;
-                        border-bottom: 1px solid var(--border-color);
-                        color: var(--primary-blue);
-                        font-weight: 600;
-                    }
-
-                    /* Grid Layout for responsive columns */
-                    .two-column {
-                        display: grid;
-                        grid-template-columns: 1fr;
-                        gap: 20px;
-                    }
-
-                    @media (min-width: 768px) {
-                        .two-column {
-                            grid-template-columns: repeat(2, 1fr);
-                        }
-                    }
-
-                    /* Form Elements */
-                    .form-group {
-                        margin-bottom: 15px;
-                        position: relative;
-                    }
-                    
-                    .form-group.radio-container {
-                        margin-top: 10px;
-                        display: flex;
-                        align-items: center;
-                        gap: 8px;
-                    }
-
-                    .form-group label {
-                        display: block;
-                        margin-bottom: 5px;
-                        font-weight: 600;
-                        color: var(--primary-dark);
-                    }
-                    
-                    .form-group.required label::after {
-                        content: ' *';
-                        color: var(--warning-red);
-                        font-weight: bold;
-                    }
-
-                    input[type="text"],
-                    input[type="number"],
-                    input[type="url"],
-                    textarea,
-                    select {
-                        width: 100%;
+                    input, select, textarea {
                         padding: 10px 12px;
-                        border: 1px solid #ccc;
-                        border-radius: 4px;
-                        font-size: 16px;
-                        transition: border-color 0.3s, box-shadow 0.3s;
-                        color: #000;
+                        border: 1px solid #d1d5db;
+                        border-radius: 8px;
+                        font-size: 1rem;
+                        transition: border-color 0.2s, box-shadow 0.2s;
+                        background-color: #f9fafb;
                     }
-                    
-                    select, 
-                    option {
-                        color: #000 !important;
-                        background-color: #fff;
-                    }
-                    
-                    /* Custom color option styling */
-                    .color-option {
-                        display: flex;
-                        align-items: center;
-                        gap: 8px;
-                        padding: 5px;
-                        background-color: #fff;
-                        color: #000;
-                        border-radius: 4px;
-                    }
-                    
-                    .color-swatch {
-                        width: 15px;
-                        height: 15px;
-                        border: 1px solid #000;
-                        border-radius: 50%;
-                        flex-shrink: 0;
-                    }
-
-
-                    /* Special styling for color input (Color Picker) */
-                    .color-input-container {
-                        display: flex; 
-                        align-items: center; 
-                        gap: 10px;
-                        flex-wrap: nowrap;
-                    }
-
-                    .color-input-container input[type="color"] {
-                        padding: 0; 
-                        height: 40px;
-                        width: 50px; /* fixed size for picker */
-                        flex-shrink: 0;
-                        cursor: pointer;
-                        border: 1px solid #ccc;
-                        border-radius: 4px;
-                        -webkit-appearance: none; 
-                        -moz-appearance: none;
-                        appearance: none;
-                        background-color: transparent; /* Allows border to show */
-                    }
-                    .color-input-container input[type="color"]::-webkit-color-swatch-wrapper {
-                        padding: 0;
-                    }
-                    .color-input-container input[type="color"]::-webkit-color-swatch {
-                        border: none;
-                        border-radius: 4px;
-                    }
-                    .color-input-container input[type="color"]::-moz-color-swatch {
-                        border: none;
-                        border-radius: 4px;
-                    }
-                    .color-input-container input[type="text"] {
-                        flex-grow: 1; /* Allows text input to fill space */
-                        font-family: monospace;
-                        text-transform: uppercase;
-                    }
-
-
-                    input[type="radio"] {
-                        width: 16px;
-                        height: 16px;
-                        cursor: pointer;
-                        accent-color: var(--primary-blue);
-                    }
-                    
-                    input[type="checkbox"] {
-                        width: 18px;
-                        height: 18px;
-                        cursor: pointer;
-                        accent-color: var(--secondary-green);
-                        border-radius: 3px;
-                    }
-
-
-                    input:focus,
-                    textarea:focus,
-                    select:focus,
-                    input[type="color"]:focus {
-                        border-color: var(--primary-blue);
+                    input:focus, select:focus, textarea:focus {
+                        border-color: #4f46e5;
+                        box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15);
                         outline: none;
-                        box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+                        background-color: white;
                     }
-                    
-                    /* Styling for read-only input */
-                    input[readOnly] {
-                        background-color: #f7f7f7;
-                        cursor: not-allowed;
-                        color: #000;
-                        font-weight: 600;
-                    }
-
-
                     textarea {
-                        min-height: 100px;
                         resize: vertical;
+                        min-height: 80px;
                     }
-
-                    /* Helper Text/Warnings */
-                    .price-warning {
-                        color: var(--warning-red);
-                        font-size: 0.85em;
-                        margin-top: 5px;
-                        font-weight: 600;
+                    .full-width {
+                        grid-column: 1 / -1;
                     }
-                    
-                    .help-text {
-                        font-size: 0.8em;
-                        color: #666;
-                        margin-top: 5px;
+                    .submit-container {
+                        margin-top: 30px;
+                        text-align: right;
                     }
-                    
-                    /* Color Row Styling */
-                    .color-row {
-                        display: grid;
-                        grid-template-columns: 50px 1fr 120px 30px; /* Picker | Name/Hex/Label | Checkbox | Remove Btn */
-                        gap: 10px;
-                        margin-bottom: 10px;
-                        align-items: center;
-                        padding: 8px;
-                        border: 1px solid var(--border-color);
-                        border-radius: 4px;
-                        transition: border-color 0.2s;
-                    }
-                    
-                    .color-row.is-prime {
-                        border-color: var(--secondary-green);
-                        background-color: #e6ffe6;
-                    }
-                    
-                    .prime-label {
-                        font-weight: 600;
-                        color: var(--secondary-green);
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        gap: 5px;
-                        font-size: 0.85em;
-                    }
-                    
-                    /* Image and Variation Groups (remains similar) */
-                    .item-group {
-                        padding: 15px;
-                        border: 1px dashed var(--border-color);
-                        border-radius: 4px;
-                        margin-bottom: 15px;
-                        background-color: #fcfcfc;
-                        position: relative;
-                    }
-                    
-                    .item-group h4 {
-                        margin-top: 0;
-                        color: var(--primary-blue);
-                        font-size: 1.1em;
-                        border-bottom: 1px dotted var(--border-color);
-                        padding-bottom: 5px;
-                        margin-bottom: 10px;
-                        display: flex;
-                        align-items: center;
-                    }
-
-                    .primary-tag {
-                        color: var(--secondary-green);
-                        font-weight: 700;
-                        margin-left: 10px;
-                    }
-                    
-                    .remove-btn {
-                        background: var(--warning-red);
+                    .btn-primary {
+                        background-color: #4f46e5;
                         color: white;
-                        border: none;
-                        border-radius: 50%;
-                        width: 24px;
-                        height: 24px;
-                        font-size: 14px;
-                        line-height: 1;
-                        cursor: pointer;
-                        opacity: 0.7;
-                        transition: opacity 0.2s;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                    }
-                    
-                    .remove-btn.absolute {
-                         position: absolute;
-                         top: 10px;
-                         right: 10px;
-                    }
-                    
-                    .remove-btn:hover {
-                        opacity: 1;
-                        box-shadow: 0 0 5px rgba(211, 47, 47, 0.5);
-                    }
-
-
-                    /* Grid Layout for variations */
-                    .variation-grid {
-                        display: grid;
-                        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-                        gap: 10px;
-                        margin-bottom: 20px;
-                    }
-                    
-                    /* Specifications Group Styling */
-                    .specifications-group {
-                        /* This is the card section wrapper now */
-                    }
-                    
-                    .spec-row {
-                        display: grid;
-                        grid-template-columns: 1fr 1fr auto; /* Key | Value | Remove Btn */
-                        gap: 10px;
-                        margin-bottom: 10px;
-                        align-items: end;
-                    }
-                    
-                    .spec-row label {
-                        font-weight: 400; /* Lighter weight for clarity in the repeating group */
-                    }
-                    
-                    .spec-row input {
-                        padding: 8px;
-                    }
-
-
-                    /* Buttons */
-                    .btn {
-                        padding: 10px 20px;
-                        border: none;
-                        border-radius: 4px;
-                        cursor: pointer;
+                        padding: 12px 30px;
+                        border-radius: 8px;
                         font-weight: 600;
-                        transition: background-color 0.2s, transform 0.1s;
+                        transition: background-color 0.2s, box-shadow 0.2s;
+                        cursor: pointer;
+                        border: none;
                         display: inline-flex;
                         align-items: center;
                         justify-content: center;
-                        gap: 8px;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
                     }
-                    
-                    .btn-small {
-                        padding: 6px 12px;
-                        font-size: 0.85em;
-                    }
-
-                    .btn-primary {
-                        background-color: var(--primary-blue);
-                        color: white;
-                        box-shadow: 0 2px 4px rgba(0, 123, 255, 0.4);
-                    }
-                    
                     .btn-primary:hover {
-                        background-color: #0056b3;
+                        background-color: #4338ca;
+                        box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
                     }
-                    
-                    .btn-primary:active {
-                        transform: scale(0.99);
+                    .btn-primary:disabled {
+                        background-color: #a5b4fc;
+                        cursor: not-allowed;
+                        box-shadow: none;
                     }
-
-                    .btn-secondary {
-                        background-color: #f0f0f0;
-                        color: var(--primary-dark);
-                        border: 1px solid #ccc;
-                    }
-                    
-                    .btn-secondary:hover {
-                        background-color: #e0e0e0;
-                    }
-
-                    .button-group {
-                        display: flex;
-                        gap: 10px;
-                        margin-top: 15px;
-                        flex-wrap: wrap;
-                    }
-                    
-                    .submit-container {
-                        text-align: right;
-                        padding-top: 20px;
-                        border-top: 1px solid var(--border-color);
-                    }
-
-                    /* Loading Spinner (Pure CSS) */
                     .spinner {
                         border: 4px solid rgba(255, 255, 255, 0.3);
-                        border-top: 4px solid white;
+                        border-top: 4px solid #fff;
                         border-radius: 50%;
                         width: 20px;
                         height: 20px;
                         animation: spin 1s linear infinite;
                     }
-                    
                     @keyframes spin {
                         0% { transform: rotate(0deg); }
-                        100% { transform: rotate(360deg); }
+                        100% { transform: transform: rotate(360deg); }
+                    }
+                    .variation-tab {
+                        cursor: pointer;
+                        padding: 8px 15px;
+                        border-radius: 6px;
+                        margin-right: 8px;
+                        transition: background-color 0.2s;
+                        border: 1px solid #e5e7eb;
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    }
+                    .variation-tab.active {
+                        background-color: #4f46e5;
+                        color: white;
+                        border-color: #4f46e5;
+                    }
+                    .color-swatch {
+                        width: 16px;
+                        height: 16px;
+                        border-radius: 50%;
+                        border: 1px solid rgba(0,0,0,0.1);
+                    }
+                    .image-preview-grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+                        gap: 10px;
+                        margin-top: 15px;
+                    }
+                    .image-item {
+                        cursor: pointer;
+                        transition: transform 0.2s, box-shadow 0.2s;
+                    }
+                    .image-item.editing {
+                        box-shadow: 0 0 0 4px #4f46e5;
+                    }
+                    .image-item:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                    }
+                    .spec-tag {
+                        background-color: #eef2ff;
+                        color: #4338ca;
+                        border: 1px solid #c7d2fe;
+                        padding: 6px 10px;
+                        border-radius: 6px;
+                        font-size: 0.85rem;
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        font-weight: 500;
+                    }
+                    /* Responsive adjustments */
+                    @media (max-width: 768px) {
+                        .container {
+                            padding: 15px;
+                        }
+                        .form-grid {
+                            grid-template-columns: 1fr;
+                        }
                     }
                 `}
             </style>
             
-            <div className="dashboard-container">
-                <header className="dashboard-header">
-                    <h2>📦 Create New Product</h2>
-                    <span className="user-id-display">Data Management Console</span>
-                </header>
-                
-                <form onSubmit={handleSubmit} className="product-form">
+            <div className="container">
+                <h1>Create New Product with Variations</h1>
+                <p className="text-sm text-gray-500 mb-6">
+                    Define the core product first. Details like Price, Stock, Specs, and Description are configured for each color variation.
+                </p>
+
+                <form onSubmit={handleSubmit}>
                     
-                    {/* --- Section 1: Basic Information --- */}
-                    <div className="card-section">
-                        <h3>1. Basic Product Info</h3>
-                        <div className="form-group required">
-                            <label htmlFor="name">Product Name</label>
+                    {/* --- Basic Information (Top Level) --- */}
+                    <div className="section-heading">Basic Information</div>
+                    <div className="form-grid">
+                        
+                        <div className="form-group">
+                            <label htmlFor="name">Product Name *</label>
                             <input
-                                type="text"
                                 id="name"
                                 name="name"
+                                type="text"
                                 value={formData.name}
-                                onChange={handleChange}
-                                placeholder="e.g., Slim-Fit Cotton T-Shirt"
+                                onChange={handleInputChange}
+                                placeholder="E.g., V-Neck T-Shirt"
                                 required
                             />
-                            <p className="help-text">Slug is auto-generated for the URL: 
-                                <span style={{fontWeight: 600, color: '#333'}}> {formData.slug || 'slug-will-appear-here'}</span>
-                            </p>
                         </div>
 
-                        <div className="two-column">
-                            <div className="form-group">
-                                <label htmlFor="brand">Brand</label>
-                                <input type="text" id="brand" name="brand" value={formData.brand} onChange={handleChange} placeholder="e.g., Nike, Puma" />
-                            </div>
-                            
-                            {/* Vendor Name (Dropdown) and Vendor ID (Read-Only) */}
-                            <div>
-                                <div className="form-group required">
-                                    <label htmlFor="vendorId">Vendor Name</label>
-                                    <select 
-                                        id="vendorId" 
-                                        name="vendorId" 
-                                        value={formData.vendorId} 
-                                        onChange={handleVendorChange} 
-                                        required
-                                    >
-                                        {VENDOR_OPTIONS.map((vendor) => (
-                                            <option 
-                                                key={vendor.id || 'placeholder'} 
-                                                value={vendor.id} 
-                                                disabled={vendor.id === ''}
-                                            >
-                                                {vendor.name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div className="form-group" style={{marginBottom: 0}}>
-                                    <label htmlFor="vendorIdDisplay">Vendor ID (Read Only)</label>
-                                    <input 
-                                        type="text" 
-                                        id="vendorIdDisplay" 
-                                        value={formData.vendorId || 'Not Selected'} 
-                                        readOnly 
-                                        placeholder="VEN-XXX-XXX"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                        <div className="two-column">
-                            {/* Category Dropdown */}
-                            <div className="form-group required">
-                                <label htmlFor="category">Category</label>
-                                <select 
-                                    id="category" 
-                                    name="category" 
-                                    value={formData.category} 
-                                    onChange={handleChange}
-                                    required
-                                >
-                                    {CATEGORY_OPTIONS.map((cat, index) => (
-                                        <option 
-                                            key={index} 
-                                            value={cat} 
-                                            disabled={index === 0 && cat === 'Select Category'}
-                                        >
-                                            {cat}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label htmlFor="subCategory">Sub Category</label>
-                                <input type="text" id="subCategory" name="subCategory" value={formData.subCategory} onChange={handleChange} placeholder="e.g., Laptops, T-Shirts" />
-                            </div>
+                        <div className="form-group">
+                            <label htmlFor="brand">Brand</label>
+                            <input
+                                id="brand"
+                                name="brand"
+                                type="text"
+                                value={formData.brand}
+                                onChange={handleInputChange}
+                                placeholder="E.g., TrendCo"
+                            />
                         </div>
                         
                         <div className="form-group">
-                            <label htmlFor="sku">SKU (Stock Keeping Unit)</label>
-                            <input type="text" id="sku" name="sku" value={formData.sku} onChange={handleChange} placeholder="Optional, will be checked for uniqueness" />
-                        </div>
-                    </div>
-
-                 
-                    <div className="card-section two-column">
-                        <div>
-                            <h3>2. Pricing (Discount-Driven)</h3>
-                            
-                            <div className="form-group required">
-                                <label htmlFor="mrp">MRP (Max Retail Price - ₹)</label>
-                                <input
-                                    type="number"
-                                    id="mrp"
-                                    name="mrp"
-                                    value={formData.price.mrp}
-                                    onChange={handlePriceChange}
-                                    min="0"
-                                    step="0.01"
-                                    required
-                                />
-                            </div>
-
-                           
-                            <div className="form-group">
-                                <label htmlFor="discountPercent">Discount (%)</label>
-                                <input
-                                    type="number"
-                                    id="discountPercent"
-                                    name="discountPercent"
-                                    value={formData.price.discountPercent}
-                                    onChange={handlePriceChange} 
-                                    min="0"
-                                    max="100"
-                                    step="0.01"
-                                    placeholder="Enter discount rate (0-100)"
-                                />
-                                <p className="help-text">This value determines the Selling Price.</p>
-                            </div>
-
-                           
-                            <div className="form-group">
-                                <label htmlFor="sellingPrice">Selling Price (Calculated - ₹)</label>
-                                <input
-                                    type="text"
-                                    id="sellingPrice"
-                                    name="sellingPrice"
-                                    value={parseFloat(formData.price.sellingPrice).toFixed(2)} // Display calculated value
-                                    readOnly // Now read-only
-                                    style={{
-                                        color: formData.price.discountPercent > 0 ? 'var(--secondary-green)' : '#000',
-                                        fontWeight: '600'
-                                    }}
-                                />
-                                <p className="help-text">Selling Price = MRP - (MRP * Discount%).</p>
-                            </div>
-                        </div>
-                        <div>
-                            <h3>3. Publishing Status</h3>
-                            <div className="form-group required">
-                                <label htmlFor="publishStatus">Status</label>
-                                <select
-                                    id="publishStatus"
-                                    name="publishStatus"
-                                    value={formData.publishStatus}
-                                    onChange={handleChange}
-                                    required
-                                >
-                                    {VALID_STATUSES.map(status => (
-                                        <option key={status} value={status}>{status}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label htmlFor="warrantyYears">Warranty (Years)</label>
-                                <input type="number" id="warrantyYears" name="warrantyYears" value={formData.warrantyYears} onChange={handleChange} min="0" placeholder="0" />
-                            </div>
-                            <div className="form-group">
-                                <label htmlFor="returnPolicyDays">Return Policy (Days)</label>
-                                <input type="number" id="returnPolicyDays" name="returnPolicyDays" value={formData.returnPolicyDays} onChange={handleChange} min="0" placeholder="7" />
-                            </div>
-                        </div>
-                    </div>
-                    
-                   
-                    <div className="card-section specifications-group">
-                        <h3>4. Product Specifications & Colors</h3>
-                  
-                         <div className="form-group">
-                            <label htmlFor="highlightHeading">Highlight Heading (Used for banner/top feature)</label>
+                            <label htmlFor="highlightHeading">Highlight Heading</label>
                             <input
-                                type="text"
                                 id="highlightHeading"
                                 name="highlightHeading"
+                                type="text"
                                 value={formData.highlightHeading}
-                                onChange={handleChange}
-                                placeholder="e.g., Ultra-Comfort, Quick Dry Technology"
+                                onChange={handleInputChange}
+                                placeholder="E.g., Key Features"
                             />
-                            <p className="help-text">A short, punchy phrase used to highlight a key feature.</p>
+                        </div>
+
+                        <div className="form-group">
+                            <label htmlFor="sku">Base SKU</label>
+                            <input
+                                id="sku"
+                                name="sku"
+                                type="text"
+                                value={formData.sku}
+                                onChange={handleInputChange}
+                                placeholder="E.g., VNT-001"
+                            />
                         </div>
                         
-                        <hr style={{margin: '25px 0', borderStyle: 'dotted'}}/>
-                        
-                       
-                        <h4 style={{border: 'none', color: 'var(--primary-dark)'}}>Available Product Colors (Designate one as Prime)</h4>
-                        
-                        {formData.productColors.map((color, index) => (
-                            <div 
-                                key={color.id} 
-                                className={`color-row ${color.isPrime ? 'is-prime' : ''}`}
+                        <div className="form-group">
+                            <label htmlFor="category">Category *</label>
+                            <select
+                                id="category"
+                                name="category"
+                                value={formData.category}
+                                onChange={handleInputChange}
+                                required
                             >
-                                
-                                <input 
-                                    type="color" 
-                                    value={color.hex} 
-                                    onChange={(e) => handleColorChange(index, 'hex', e.target.value)} 
-                                />
-                                
-                           
-                                <div className="form-group" style={{marginBottom: 0}}>
-                                    
-                                    <p className="help-text" style={{marginTop: 5, color: color.isPrime ? 'var(--secondary-green)' : 'var(--dark-grey)'}}>
-                                        HEX: {color.hex.toUpperCase()} {color.isPrime ? ' | ✓ PRIME DISPLAY' : ''}
-                                    </p>
-                                </div>
-                                
-                              
-                                <div className="prime-label">
-                                    <input
-                                        type="checkbox"
-                                        id={`prime-${color.id}`}
-                                        name={`isPrime-${color.id}`}
-                                        checked={color.isPrime}
-                                        onChange={(e) => handleColorChange(index, 'isPrime', e.target.checked)}
-                                    />
-                                    <label htmlFor={`prime-${color.id}`} style={{color: 'var(--primary-dark)', fontWeight: 600, fontSize: '1em', marginBottom: 0}}>
-                                        Prime
-                                    </label>
-                                </div>
-                                
+                                {CATEGORY_LIST.map(category => (
+                                    <option key={category} value={category}>
+                                        {category}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        
+                        <div className="form-group">
+                            <label htmlFor="subCategory">Sub-Category</label>
+                            <input
+                                id="subCategory"
+                                name="subCategory"
+                                type="text"
+                                value={formData.subCategory}
+                                onChange={handleInputChange}
+                                placeholder="E.g., T-Shirts"
+                            />
+                        </div>
+                        
+                        <div className="form-group">
+                            <label htmlFor="vendorId">Vendor *</label>
+                            <select
+                                id="vendorId"
+                                name="vendorId"
+                                value={formData.vendorId}
+                                onChange={handleInputChange}
+                                required
+                            >
+                                {VENDOR_LIST.map(vendor => (
+                                    <option key={vendor.id} value={vendor.id}>
+                                        {vendor.name}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="form-group">
+                            <label htmlFor="publishStatus">Publish Status</label>
+                            <select
+                                id="publishStatus"
+                                name="publishStatus"
+                                value={formData.publishStatus}
+                                onChange={handleInputChange}
+                            >
+                                {VALID_STATUSES.map(status => (
+                                    <option key={status} value={status}>
+                                        {status}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
+                    {/* --- Variation Management: Colors --- */}
+                    <div className="section-heading">Color Variations ({formData.productColors.length} added)</div>
+                    
+                    <div className="flex flex-wrap items-center mb-4 gap-2">
+                        {formData.productColors.map(color => (
+                            <div 
+                                key={color.hex}
+                                className={`variation-tab ${currentVariationHex === color.hex ? 'active' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                                onClick={() => setCurrentVariationHex(color.hex)}
+                            >
+                                <div className="color-swatch" style={{backgroundColor: color.hex}}></div>
+                                <span>{color.hex} {color.isPrime && '(Primary)'}</span>
                                 <button 
                                     type="button" 
-                                    className="remove-btn" 
-                                    onClick={() => removeProductColor(color.id)}
+                                    onClick={(e) => { e.stopPropagation(); handleRemoveColor(color.hex); }} 
+                                    className="ml-2 text-xs font-bold opacity-70 hover:opacity-100"
                                 >
                                     &times;
                                 </button>
                             </div>
                         ))}
+                    </div>
 
-                        <div className="button-group">
-                            <button type="button" onClick={addProductColor} className="btn btn-secondary btn-small">
-                                + Add Another Color
+                    <div className="form-grid items-end gap-4 border p-4 rounded-lg bg-gray-50 mb-6">
+                        <div className="form-group">
+                            <label htmlFor="newColorHex">Add New Color (Hex Code)</label>
+                            <input
+                                id="newColorHex"
+                                name="newColorHex"
+                                type="color"
+                                value={formData.newColorHex}
+                                onChange={handleNewColorChange}
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label className="flex items-center space-x-2 mt-4">
+                                <input
+                                    type="checkbox"
+                                    name="newColorIsPrime"
+                                    checked={formData.newColorIsPrime}
+                                    onChange={handleNewColorChange}
+                                />
+                                <span>Set as Primary Color?</span>
+                            </label>
+                        </div>
+                        <div>
+                             <button type="button" onClick={handleAddColor} className="btn-primary w-full h-[42px] mt-4">
+                                Add Color
                             </button>
                         </div>
-                        
-                        <hr style={{margin: '25px 0', borderStyle: 'dotted'}}/>
-
-                
-                        <h4 style={{border: 'none', color: 'var(--primary-dark)'}}>Technical Specifications</h4>
-                        {formData.specifications.map((spec, index) => (
-                            <div key={index} className="spec-row">
-                                <div className="form-group" style={{marginBottom: 0}}>
-                                    <label htmlFor={`specKey${index}`}>Key</label>
-                                    <input
-                                        type="text"
-                                        id={`specKey${index}`}
-                                        name="key"
-                                        value={spec.key}
-                                        onChange={(e) => handleSpecChange(index, e)}
-                                        placeholder="e.g., Material"
-                                    />
-                                </div>
-                                <div className="form-group" style={{marginBottom: 0}}>
-                                    <label htmlFor={`specValue${index}`}>Value</label>
-                                    <input
-                                        type="text"
-                                        id={`specValue${index}`}
-                                        name="value"
-                                        value={spec.value}
-                                        onChange={(e) => handleSpecChange(index, e)}
-                                        placeholder="e.g., 100% Organic Cotton"
-                                    />
-                                </div>
-                                {formData.specifications.length > 1 && (
-                                    <button 
-                                        type="button" 
-                                        className="remove-btn" 
-                                        style={{position: 'static', transform: 'none', margin: 'auto 0 5px 0'}} 
-                                        onClick={() => removeSpecField(index)}
+                    </div>
+                    
+                    {/* --- Variation Details Editor --- */}
+                    {currentVariationHex && (
+                        <div className="border p-6 rounded-lg shadow-md bg-white">
+                            <h3 className="text-xl font-semibold mb-4 text-indigo-600 flex items-center justify-between">
+                                <span>
+                                    Details for Color: 
+                                    <span style={{ color: currentVariationHex, marginLeft: '8px' }}>{currentVariationHex}</span>
+                                </span>
+                                {/* Button to set this color as the ONLY primary color (The Edit Option) */}
+                                {!isCurrentVariationPrimary && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleSetPrimaryColor(currentVariationHex)}
+                                        className="text-sm font-medium bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full hover:bg-yellow-200 transition"
                                     >
-                                        &times;
+                                        Make this the Primary Color
                                     </button>
                                 )}
-                            </div>
-                        ))}
-                        <div className="button-group">
-                            <button type="button" onClick={addSpecField} className="btn btn-secondary btn-small">
-                                + Add Specification
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* --- Section 5: Product Images (Same as before) --- */}
-                    <div className="card-section">
-                        <h3>5. Product Images</h3>
-                        {formData.images.map((img, index) => (
-                            <div key={index} className="item-group">
-                                <h4>
-                                    Image {index + 1}
-                                    {img.isPrimary && <span className="primary-tag">(Primary)</span>}
-                                </h4>
+                                {isCurrentVariationPrimary && (
+                                    <span className="text-sm font-medium bg-green-100 text-green-800 px-3 py-1 rounded-full">
+                                        Current Primary
+                                    </span>
+                                )}
+                            </h3>
+                            
+                            {/* Variation Price & Stock */}
+                            <div className="section-heading mt-0">Price & Stock</div>
+                            <div className="form-grid">
                                 
-                                <button type="button" className="remove-btn absolute" onClick={() => removeImageField(index)}>&times;</button>
+                                <PriceInput 
+                                    label={`MRP (${currentPrice.currency})`} 
+                                    name="mrp" 
+                                    value={currentPrice.mrp} 
+                                    onChange={handleVariationChange}
+                                />
+                                <PriceInput 
+                                    label="Discount (%)" 
+                                    name="discountPercent" 
+                                    value={currentPrice.discountPercent} 
+                                    onChange={handleVariationChange}
+                                    suffix="%"
+                                />
                                 
-                                <div className="two-column">
-                                    <div className="form-group">
-                                        <label htmlFor={`imageUrl${index}`}>Image URL</label>
-                                        <input
-                                            type="url"
-                                            id={`imageUrl${index}`}
-                                            name="url"
-                                            value={img.url}
-                                            onChange={(e) => handleImageChange(index, e)}
-                                            placeholder="https://image-cdn.com/product-image.jpg"
-                                        />
-                                    </div>
-                                    <div className="form-group">
-                                        <label htmlFor={`imageAlt${index}`}>Alt Text (SEO)</label>
-                                        <input
-                                            type="text"
-                                            id={`imageAlt${index}`}
-                                            name="alt"
-                                            value={img.alt}
-                                            onChange={(e) => handleImageChange(index, e)}
-                                            placeholder="A concise description for accessibility"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="form-group radio-container">
+                                {/* Selling Price is now displayed in a stylish h3 */}
+                                <SellingPriceDisplay 
+                                    price={currentPrice.sellingPrice}
+                                    currency={currentPrice.currency}
+                                />
+                                
+                                <div className="form-group">
+                                    <label htmlFor="stock">Stock Quantity</label>
                                     <input
-                                        type="radio"
-                                        id={`isPrimary${index}`}
-                                        name={`isPrimaryGroup`}
-                                        checked={img.isPrimary}
-                                        onChange={() => handlePrimaryImageChange(index)}
+                                        id="stock"
+                                        name="stock"
+                                        type="number"
+                                        min="0"
+                                        value={currentVariation.stock}
+                                        onChange={handleVariationChange}
+                                        placeholder="10"
                                     />
-                                    <label htmlFor={`isPrimary${index}`} style={{marginBottom: 0, fontWeight: 400, color: '#333'}}>Set as Primary Image</label>
+                                </div>
+                            </div>
+
+                            {/* Variation Descriptions and Policies */}
+                            <div className="section-heading">Description & Policies</div>
+                            <div className="form-grid full-width">
+                                
+                                <div className="form-group">
+                                    <label htmlFor="details">Short Description / Details (Schema: details)</label>
+                                    <textarea
+                                        id="details"
+                                        name="details"
+                                        value={currentVariation.details}
+                                        onChange={handleVariationChange}
+                                        placeholder="A concise summary of the product's main benefit."
+                                        maxLength="200"
+                                    />
                                 </div>
                                 
-                            </div>
-                        ))}
-                        <button type="button" onClick={addImageField} className="btn btn-secondary">
-                            + Add Image Field
-                        </button>
-                    </div>
+                                <div className="form-group full-width">
+                                    <label htmlFor="story">Long Description / Story (Schema: story)</label>
+                                    <textarea
+                                        id="story"
+                                        name="story"
+                                        value={currentVariation.story}
+                                        onChange={handleVariationChange}
+                                        placeholder="Full details, specifications, features, and marketing copy."
+                                        rows="4"
+                                    />
+                                </div>
+                                
+                                {/* highlightHeading REMOVED from here and MOVED to top-level Basic Information */}
 
-                    {/* --- Section 6: Product Variations (UPDATED) --- */}
-                    <div className="card-section">
-                        <h3>6. Product Variations (Size & Color combinations)</h3>
-                        <p className="help-text" style={{marginBottom: '20px'}}>
-                            Define each unique combination of color and size that has its own stock and unique SKU.
-                            The Color options are pulled from Section 4.
-                        </p>
-                        
-                        {formData.variations.map((v, index) => (
-                            <div key={index} className="item-group">
-                                <h4>Variation {index + 1}</h4>
-                                <div className="variation-grid">
-                                  
-                                    <div className="form-group required">
-                                        <label htmlFor={`vColor${index}`}>Color/Style</label>
-                                        <select
-                                            id={`vColor${index}`}
-                                            name="color"
-                                            value={v.color}
-                                            onChange={(e) => handleVariationChange(index, e)}
-                                            required
+                                <div className="form-group">
+                                    <label htmlFor="styleNote">Styling Note / Usage Tip</label>
+                                    <textarea
+                                        id="styleNote"
+                                        name="styleNote"
+                                        value={currentVariation.styleNote}
+                                        onChange={handleVariationChange}
+                                        placeholder="Best practices for usage or styling."
+                                    />
+                                </div>
+                                
+                                <div className="form-group">
+                                    <label htmlFor="warrantyYears">Warranty (Years)</label>
+                                    <input
+                                        id="warrantyYears"
+                                        name="warrantyYears"
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        value={currentVariation.warrantyYears}
+                                        onChange={handleVariationChange}
+                                        placeholder="E.g., 2"
+                                    />
+                                </div>
+                                
+                                <div className="form-group">
+                                    <label htmlFor="returnPolicyDays">Return Policy (Days)</label>
+                                    <input
+                                        id="returnPolicyDays"
+                                        name="returnPolicyDays"
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        value={currentVariation.returnPolicyDays}
+                                        onChange={handleVariationChange}
+                                        placeholder="E.g., 30"
+                                    />
+                                </div>
+                            </div>
+                            
+                            {/* Variation Specifications */}
+                            <div className="section-heading">Specifications ({currentVariation.specifications.length} added)</div>
+                            <div className="form-grid items-end gap-4 border p-4 rounded-lg bg-gray-50 mb-4">
+                                <div className="form-group">
+                                    <label htmlFor="tempSpecKey">Specification Key</label>
+                                    <input
+                                        id="tempSpecKey"
+                                        name="tempSpecKey"
+                                        type="text"
+                                        value={currentVariation.tempSpecKey || ''}
+                                        onChange={handleVariationChange}
+                                        placeholder="E.g., Weight"
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label htmlFor="tempSpecValue">Specification Value</label>
+                                    <input
+                                        id="tempSpecValue"
+                                        name="tempSpecValue"
+                                        type="text"
+                                        value={currentVariation.tempSpecValue || ''}
+                                        onChange={handleVariationChange}
+                                        placeholder="E.g., 200g"
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <button type="button" onClick={handleAddSpecification} className="btn-primary w-full h-[42px] mt-4">
+                                        Add Spec
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div className="form-grid">
+                                {currentVariation.specifications.map((spec, index) => (
+                                    <div key={index} className="spec-tag">
+                                        <span>
+                                            <span className="font-bold text-gray-700">{spec.key}</span>: {spec.value}
+                                        </span>
+                                        <button 
+                                            type="button"
+                                            onClick={() => handleRemoveSpecification(index)}
+                                            className="ml-2 text-red-600 hover:text-red-800 transition text-sm"
                                         >
-                                            <option value="" disabled>Select a Color</option>
-                                            {formData.productColors.map((colorOption) => (
-                                                <option 
-                                                    key={colorOption.id} 
-                                                    value={colorOption.id}
-                                             
-                                                >
-                                                    ({colorOption.hex.toUpperCase()})
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <p className="help-text">References colors from Section 4.</p>
+                                            &times;
+                                        </button>
                                     </div>
-                                    
-                                    <div className="form-group required">
-                                        <label htmlFor={`vSize${index}`}>Size</label>
-                                        <input
-                                            type="text"
-                                            id={`vSize${index}`}
-                                            name="size"
-                                            value={v.size}
-                                            onChange={(e) => handleVariationChange(index, e)}
-                                            placeholder="e.g., L, XL, or 50ml"
-                                            required
-                                        />
-                                    </div>
-                                    
-                                
-                                    <div className="form-group required">
-                                        <label htmlFor={`vSku${index}`}>SKU (Unique)</label>
-                                        <input
-                                            type="text"
-                                            id={`vSku${index}`}
-                                            name="sku"
-                                            value={v.sku}
-                                            onChange={(e) => handleVariationChange(index, e)}
-                                            placeholder="Required for API submission"
-                                            required
-                                        />
-                                    </div>
-                                    
-                                    {/* --- Stock Level (Same as before) --- */}
-                                    <div className="form-group">
-                                        <label htmlFor={`vStock${index}`}>Stock Level</label>
-                                        <input
-                                            type="number"
-                                            id={`vStock${index}`}
-                                            name="stock"
-                                            value={v.stock}
-                                            onChange={(e) => handleVariationChange(index, e)}
-                                            min="0"
-                                        />
-                                    </div>
+                                ))}
+                            </div>
+
+
+                            {/* Variation Images */}
+                            <div className="section-heading">Images ({currentVariation.images.length} added)</div>
+                            
+                            {/* Image Add/Edit Section */}
+                            <div className="form-grid items-end gap-4 border p-4 rounded-lg bg-gray-50 mb-4">
+                                <div className="form-group">
+                                    <label htmlFor="tempImageUrl">Image URL</label>
+                                    <input
+                                        id="tempImageUrl"
+                                        name="tempImageUrl"
+                                        type="url"
+                                        value={currentVariation.tempImageUrl}
+                                        onChange={handleVariationChange}
+                                        placeholder="https://placehold.co/600x400"
+                                    />
                                 </div>
-                                
-                                <button type="button" className="remove-btn absolute" onClick={() => removeVariationField(index)}>&times;</button>
+                                <div className="form-group">
+                                    <label htmlFor="tempImageAlt">Alt Text</label>
+                                    <input
+                                        id="tempImageAlt"
+                                        name="tempImageAlt"
+                                        type="text"
+                                        value={currentVariation.tempImageAlt}
+                                        onChange={handleVariationChange}
+                                        placeholder="Image of {currentVariationHex} T-shirt"
+                                    />
+                                </div>
+                                <div className="form-group flex justify-center items-center">
+                                    <label className="flex items-center space-x-2 mt-4">
+                                        <input
+                                            type="checkbox"
+                                            name="tempImageIsPrimary"
+                                            checked={currentVariation.tempImageIsPrimary}
+                                            onChange={handleVariationChange}
+                                        />
+                                        <span>Set as Primary?</span>
+                                    </label>
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                    <button type="button" onClick={handleSaveImage} className="btn-primary w-full h-[42px]">
+                                        {editingImageIndex !== null ? 'Update Image' : 'Add Image'}
+                                    </button>
+                                    {editingImageIndex !== null && (
+                                        <button type="button" onClick={handleCancelEdit} className="text-sm text-gray-500 hover:text-gray-700">
+                                            Cancel Edit
+                                        </button>
+                                    )}
+                                </div>
                             </div>
-                        ))}
-                        <button type="button" onClick={addVariationField} className="btn btn-secondary">
-                            + Add Variation
-                        </button>
-                    </div>
-
-                    {/* --- Section 7: Description & Metadata (Same as before) --- */}
-                    <div className="card-section">
-                        <h3>7. Description & Meta</h3>
-                        
-                        <div className="two-column">
-                            <div className="form-group">
-                                <label htmlFor="keywords">SEO Keywords (Comma separated)</label>
-                                <input
-                                    type="text"
-                                    id="keywords"
-                                    name="keywords"
-                                    value={formData.keywords}
-                                    onChange={handleChange}
-                                    placeholder="shoes, running, gym, sports"
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label htmlFor="tags">Internal Tags (Comma separated)</label>
-                                <input
-                                    type="text"
-                                    id="tags"
-                                    name="tags"
-                                    value={formData.tags}
-                                    onChange={handleChange}
-                                    placeholder="summer-collection, clearance, best-seller"
-                                />
+                            
+                            {/* Image Preview Grid (Now Clickable) */}
+                            <div className="image-preview-grid">
+                                {currentVariation.images.map((img, index) => (
+                                    <div 
+                                        key={index} 
+                                        className={`relative border rounded-lg overflow-hidden shadow-sm image-item ${editingImageIndex === index ? 'editing' : ''}`}
+                                        onClick={() => handleStartEditImage(index)} // Click to start editing
+                                    >
+                                        <img 
+                                            src={img.url} 
+                                            alt={img.alt} 
+                                            className="w-full h-24 object-cover pointer-events-none" // Prevent image click from overriding div click
+                                            onError={(e) => e.target.src = `https://placehold.co/100x100/f0f0f0/666666?text=Invalid URL`}
+                                        />
+                                        {img.isPrimary && (
+                                            <span className="absolute top-1 left-1 bg-indigo-500 text-white text-xs px-1 rounded">Primary</span>
+                                        )}
+                                        <button 
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); handleRemoveImage(index); }} // Stop propagation to prevent editing when deleting
+                                            className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 text-xs hover:bg-red-700 transition flex items-center justify-center font-bold"
+                                        >
+                                            &times;
+                                        </button>
+                                    </div>
+                                ))}
                             </div>
                         </div>
-
+                    )}
+                    
+                    {/* --- SEO & Metadata (Top Level) --- */}
+                    <div className="section-heading">SEO & Metadata (Product Level)</div>
+                    <div className="form-grid full-width">
+                        
                         <div className="form-group">
-                            <label htmlFor="story">Product Story/Marketing Copy</label>
+                            <label htmlFor="seoKeywordsInput">SEO Keywords (Comma-separated)</label>
                             <textarea
-                                id="story"
-                                name="story"
-                                value={formData.description.story}
-                                onChange={handleDescriptionChange}
-                                placeholder="A compelling, narrative description highlighting benefits and emotion."
+                                id="seoKeywordsInput"
+                                name="seoKeywordsInput"
+                                value={formData.seoKeywordsInput}
+                                onChange={handleInputChange}
+                                placeholder="e.g., v-neck t-shirt, comfortable shirt, cotton wear"
+                                rows="2"
                             />
                         </div>
-
-                        <div className="form-group">
-                            <label htmlFor="details">Technical Details / Bullet Points</label>
-                            <textarea
-                                id="details"
-                                name="details"
-                                value={formData.description.details}
-                                onChange={handleDescriptionChange}
-                                placeholder="Detailed list of features, materials, and care instructions."
-                            />
-                        </div>
                         
                         <div className="form-group">
-                            <label htmlFor="styleNote">Styling Note / Usage Tip</label>
+                            <label htmlFor="internalTagsInput">Internal Tags (Comma-separated)</label>
                             <textarea
-                                id="styleNote"
-                                name="styleNote"
-                                value={formData.description.styleNote}
-                                onChange={handleDescriptionChange}
-                                placeholder="How to wear it, or best practices for usage."
+                                id="internalTagsInput"
+                                name="internalTagsInput"
+                                value={formData.internalTagsInput}
+                                onChange={handleInputChange}
+                                placeholder="e.g., summer-collection, best-seller, clearance"
+                                rows="2"
                             />
                         </div>
                     </div>
@@ -1500,10 +1352,10 @@ const CreateProduct = () => {
                     <div className="submit-container">
                         <button 
                             type="submit" 
-                            className="btn btn-primary" 
-                            disabled={loading}
+                            className="btn-primary" 
+                            disabled={loading || formData.productColors.length === 0}
                         >
-                            {loading ? <div className="spinner"></div> : 'Create Product'}
+                            {loading ? <div className="spinner"></div> : 'Submit'}
                         </button>
                     </div>
 
