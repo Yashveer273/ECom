@@ -44,6 +44,8 @@ const Sidebar = () => {
             <p className="section-title">E-commerce</p>
 
             <SidebarLink to="/products" icon={ShoppingBag}>Products</SidebarLink>
+            <SidebarLink to="/test" icon={ShoppingBag}>Buy Products Test</SidebarLink>
+
             <SidebarLink to="/orders" icon={ListOrdered}>Orders</SidebarLink>
             <SidebarLink to="/users" icon={Users}>Customers</SidebarLink>
             <SidebarLink to="/vendors" icon={Store}>Vendors</SidebarLink>

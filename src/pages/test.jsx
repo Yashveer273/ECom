@@ -44,6 +44,7 @@ const rawProductData = [
         "highlightHeading": "Ultra-soft fabric and comfortable fit.",
         "variations": [
             {
+                "PV_id":"6922bc641a947eb599a030e3-A",
                 "color": "#4640BF", // Blue (Non-Prime Color)
                 "size": "M",
                 "stock": 1,
@@ -63,6 +64,7 @@ const rawProductData = [
                 "reviews": [], "productRatings": 0
             },
             {
+                "PV_id":"6922bc641a947eb599a030e4-A",
                 "color": "#4F46E5", // Violet (Prime Color)
                 "size": "L",
                 "stock": 0,
@@ -91,6 +93,7 @@ const rawProductData = [
         "highlightHeading": "Warm and stylish sweatshirt.",
         "variations": [
              {
+                "PV_id":"6922bc641a947eb599a030e6-A",
                 "color": "#10B981", // Green (Non-Prime Color)
                 "size": "XL",
                 "stock": 5,
@@ -108,6 +111,7 @@ const rawProductData = [
                 "reviews": [], "productRatings": 0
             },
             {
+                "PV_id":"6922bc641a947eb599a030e7-A",
                 "color": "#EF4444", // Red (Prime Color)
                 "size": "XXL",
                 "stock": 10,
@@ -659,7 +663,9 @@ const Test = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
 
   const handleSelectProduct = (product) => {
+
     setSelectedProduct(product);
+    
   };
 
   const handleBackToList = () => {
